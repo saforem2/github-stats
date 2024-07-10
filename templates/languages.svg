@@ -9,15 +9,15 @@ svg {
 #background {
   width: calc(100% - 10px);
   height: calc(100% - 10px);
-  fill: white;
-  stroke: rgb(225, 228, 232);
+  fill: rgba(0,0,0,0.0);
+  stroke: rgb(131,131,131);
   stroke-width: 1px;
   rx: 6px;
   ry: 6px;
 }
 
 #gh-dark-mode-only:target #background {
-  fill: #0d1117;
+  fill: rgba(0,0,0,0.0);
   stroke-width: 0.5px;
 }
 
@@ -85,18 +85,18 @@ div.ellipsis {
   display: flex;
   height: 8px;
   overflow: hidden;
-  background-color: rgb(225, 228, 232);
+  background-color: rgba(0,0,0,0.0);
   border-radius: 6px;
   outline: 1px solid transparent;
   margin-bottom: 1em;
 }
 
 #gh-dark-mode-only:target .progress {
-  background-color: rgba(110, 118, 129, 0.4);
+  background-color: rgba(110, 118, 129, 0.0);
 }
 
 .progress-item {
-  outline: 2px solid rgb(225, 228, 232);
+  outline: 2px solid rgba(225, 228, 232,0.0);
   border-collapse: collapse;
 }
 
