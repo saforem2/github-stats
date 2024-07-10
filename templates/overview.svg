@@ -9,15 +9,15 @@ svg {
 #background {
   width: calc(100% - 10px);
   height: calc(100% - 10px);
-  fill: white;
-  stroke: rgb(225, 228, 232);
+  fill: rgba(255, 255, 256, 0.0);
+  stroke: rgb(131,131,131);
   stroke-width: 1px;
   rx: 6px;
   ry: 6px;
 }
 
 #gh-dark-mode-only:target #background {
-  fill: #0d1117;
+  fill: rgba(0,0,0,0.0);
   stroke-width: 0.5px;
 }
 
@@ -38,11 +38,11 @@ th {
   text-align: left;
   font-size: 14px;
   font-weight: 600;
-  color: rgb(3, 102, 214);
+  color: rgb(131,131,131);
 }
 
 #gh-dark-mode-only:target th {
-  color: #58a6ff;
+  color: rgb(131,131,131);
 }
 
 td {
@@ -55,7 +55,7 @@ td {
 }
 
 #gh-dark-mode-only:target td {
-  color: #c9d1d9;
+  color: #838383;
 }
 
 tr {
