@@ -11,14 +11,14 @@ svg {
   height: calc(100% - 10px);
   fill: rgba(0,0,0,0.0);
   stroke: rgb(131,131,131);
-  stroke-width: 1px;
+  stroke-width: 0px;
   rx: 6px;
   ry: 6px;
 }
 
 #gh-dark-mode-only:target #background {
   fill: rgba(0,0,0,0.0);
-  stroke-width: 0.5px;
+  stroke-width: 0px;
 }
 
 foreignObject {
@@ -32,13 +32,13 @@ h2 {
   line-height: 24px;
   font-size: 16px;
   font-weight: 600;
-  color: rgb(36, 41, 46);
-  fill: rgb(36, 41, 46);
+  color: rgb(131, 131, 131);
+  fill: rgb(131, 131, 131);
 }
 
 #gh-dark-mode-only:target h2 {
-  color: #c9d1d9;
-  fill: #c9d1d9;
+  color: #838383;
+  fill: #838383;
 }
 
 ul {
@@ -96,30 +96,30 @@ div.ellipsis {
 }
 
 .progress-item {
-  outline: 2px solid rgba(225, 228, 232,0.0);
+  outline: 0px solid rgba(225, 228, 232,0.0);
   border-collapse: collapse;
 }
 
 #gh-dark-mode-only:target .progress-item {
-  outline: 2px solid #393f47;
+  outline: 0px solid #393f47;
 }
 
 .lang {
   font-weight: 600;
   margin-right: 4px;
-  color: rgb(36, 41, 46);
+  color: rgb(131, 131, 131);
 }
 
 #gh-dark-mode-only:target .lang {
-  color: #c9d1d9;
+  color: #838383;
 }
 
 .percent {
-  color: rgb(88, 96, 105)
+  color: rgb(131, 131, 131)
 }
 
 #gh-dark-mode-only:target .percent {
-  color: #8b949e;
+  color: #838383;
 }
 </style>
 <g>
