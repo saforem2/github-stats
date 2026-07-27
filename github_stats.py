@@ -64,32 +64,37 @@ class Queries(object):
                 result = await r_async.json()
                 if result is not None:
                     return result
-            except Exception:
-                print("aiohttp failed for GraphQL query")
+            except Exception as e_async:
+                # Log str(), not repr(): the aiohttp error's repr embeds the
+                # request headers (including the Authorization token), which
+                # must never be printed to CI logs. str() is just status/url.
+                print(f"aiohttp failed for GraphQL query: {e_async}")
                 # Fall back on non-async requests
                 try:
                     async with self.semaphore:
-                        r_requests = requests.post(
+                        # Context manager ensures the connection is released
+                        # back to the pool on each attempt, even on retries.
+                        with requests.post(
                             "https://api.github.com/graphql",
                             headers=headers,
                             json={"query": generated_query},
-                        )
-                    if r_requests.status_code >= 500:
-                        raise requests.exceptions.HTTPError(
-                            f"{r_requests.status_code} server error"
-                        )
-                    result = r_requests.json()
+                        ) as r_requests:
+                            if r_requests.status_code >= 500:
+                                raise requests.exceptions.HTTPError(
+                                    f"{r_requests.status_code} server error"
+                                )
+                            result = r_requests.json()
                     if result is not None:
                         return result
-                except Exception:
+                except Exception as e_sync:
                     print(
                         f"requests failed for GraphQL query "
-                        f"(attempt {attempt + 1}/10), retrying..."
+                        f"(attempt {attempt + 1}/10): {e_sync}, retrying..."
                     )
             # Exponential-ish backoff, capped, before the next attempt.
             await asyncio.sleep(min(2 * (attempt + 1), 15))
         # All retries exhausted.
-        raise Exception(
+        raise RuntimeError(
             "GraphQL query failed after 10 attempts (GitHub API kept "
             "returning a server error / non-JSON response)."
         )
