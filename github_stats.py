@@ -41,29 +41,58 @@ class Queries(object):
         headers = {
             "Authorization": f"Bearer {self.access_token}",
         }
-        try:
-            async with self.semaphore:
-                r_async = await self.session.post(
-                    "https://api.github.com/graphql",
-                    headers=headers,
-                    json={"query": generated_query},
-                )
-            result = await r_async.json()
-            if result is not None:
-                return result
-        except:
-            print("aiohttp failed for GraphQL query")
-            # Fall back on non-async requests
-            async with self.semaphore:
-                r_requests = requests.post(
-                    "https://api.github.com/graphql",
-                    headers=headers,
-                    json={"query": generated_query},
-                )
-                result = r_requests.json()
+        # GitHub's GraphQL gateway intermittently returns 502/503 (with an HTML
+        # body, not JSON) when a heavy viewer query brushes its ~10s server-side
+        # timeout. That is transient, so retry with backoff instead of crashing
+        # on the JSONDecodeError. Mirrors the retry loop in query_rest().
+        for attempt in range(10):
+            try:
+                async with self.semaphore:
+                    r_async = await self.session.post(
+                        "https://api.github.com/graphql",
+                        headers=headers,
+                        json={"query": generated_query},
+                    )
+                if r_async.status >= 500:
+                    # Bad gateway / unavailable: transient, retry.
+                    raise aiohttp.ClientResponseError(
+                        r_async.request_info,
+                        r_async.history,
+                        status=r_async.status,
+                        message="server error",
+                    )
+                result = await r_async.json()
                 if result is not None:
                     return result
-        return dict()
+            except Exception:
+                print("aiohttp failed for GraphQL query")
+                # Fall back on non-async requests
+                try:
+                    async with self.semaphore:
+                        r_requests = requests.post(
+                            "https://api.github.com/graphql",
+                            headers=headers,
+                            json={"query": generated_query},
+                        )
+                    if r_requests.status_code >= 500:
+                        raise requests.exceptions.HTTPError(
+                            f"{r_requests.status_code} server error"
+                        )
+                    result = r_requests.json()
+                    if result is not None:
+                        return result
+                except Exception:
+                    print(
+                        f"requests failed for GraphQL query "
+                        f"(attempt {attempt + 1}/10), retrying..."
+                    )
+            # Exponential-ish backoff, capped, before the next attempt.
+            await asyncio.sleep(min(2 * (attempt + 1), 15))
+        # All retries exhausted.
+        raise Exception(
+            "GraphQL query failed after 10 attempts (GitHub API kept "
+            "returning a server error / non-JSON response)."
+        )
 
     async def query_rest(self, path: str, params: Optional[Dict] = None) -> Dict:
         """
