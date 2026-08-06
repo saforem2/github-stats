@@ -49,8 +49,11 @@ jobs:
       run: |
         git config --global user.name "saforem2/github-stats"
         git config --global user.email "github-stats[bot]@saforem2.github.io"
-        git pull
         git add .
         # Force the build to succeed, even if no files were changed
         git commit -m 'Update generated files' || true
+        # Commit before pulling: the freshly generated SVGs are local changes,
+        # so pulling first aborts with "local changes would be overwritten"
+        # whenever master moved while this job was running.
+        git pull --rebase
         git push

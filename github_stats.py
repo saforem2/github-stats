@@ -127,12 +127,22 @@ class Queries(object):
                     print(f"A path returned 202. Retrying...")
                     await asyncio.sleep(2)
                     continue
+                if r_async.status == 204:
+                    # 204 No Content is a valid terminal response with an empty
+                    # body: /stats/contributors returns it for repositories with
+                    # no contributor data (empty repos, forks with no commits).
+                    # Retrying can never turn it into data, and calling .json()
+                    # on the empty body raises ContentTypeError.
+                    return dict()
 
                 result = await r_async.json()
                 if result is not None:
                     return result
-            except:
-                print("aiohttp failed for rest query")
+            except Exception as e_async:
+                # Log str(), not repr(): the aiohttp error's repr embeds the
+                # request headers (including the Authorization token), which
+                # would leak the token into public CI logs.
+                print(f"aiohttp failed for rest query: {e_async}")
                 # Fall back on non-async requests
                 async with self.semaphore:
                     r_requests = requests.get(
@@ -144,6 +154,8 @@ class Queries(object):
                         print(f"A path returned 202. Retrying...")
                         await asyncio.sleep(2)
                         continue
+                    elif r_requests.status_code == 204:
+                        return dict()
                     elif r_requests.status_code == 200:
                         return r_requests.json()
         # print(f"There were too many 202s. Data for {path} will be incomplete.")
