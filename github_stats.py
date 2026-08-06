@@ -125,27 +125,43 @@ class Queries(object):
                 if r_async.status == 202:
                     # print(f"{path} returned 202. Retrying...")
                     print(f"A path returned 202. Retrying...")
+                    r_async.release()
                     await asyncio.sleep(2)
                     continue
+                if r_async.status == 204:
+                    # 204 No Content is a valid terminal response with an empty
+                    # body: /stats/contributors returns it for repositories with
+                    # no contributor data (empty repos, forks with no commits).
+                    # Retrying can never turn it into data, and calling .json()
+                    # on the empty body raises ContentTypeError.
+                    r_async.release()
+                    return dict()
 
                 result = await r_async.json()
                 if result is not None:
                     return result
-            except:
-                print("aiohttp failed for rest query")
+            except Exception as e_async:
+                # Log str(), not repr(): the aiohttp error's repr embeds the
+                # request headers (including the Authorization token), which
+                # would leak the token into public CI logs.
+                print(f"aiohttp failed for rest query: {e_async}")
                 # Fall back on non-async requests
                 async with self.semaphore:
-                    r_requests = requests.get(
+                    with requests.get(
                         f"https://api.github.com/{path}",
                         headers=headers,
                         params=tuple(params.items()),
-                    )
-                    if r_requests.status_code == 202:
-                        print(f"A path returned 202. Retrying...")
-                        await asyncio.sleep(2)
-                        continue
-                    elif r_requests.status_code == 200:
-                        return r_requests.json()
+                    ) as r_requests:
+                        status = r_requests.status_code
+                        if status == 202:
+                            print(f"A path returned 202. Retrying...")
+                        elif status == 204:
+                            return dict()
+                        elif status == 200:
+                            return r_requests.json()
+                if status == 202:
+                    await asyncio.sleep(2)
+                    continue
         # print(f"There were too many 202s. Data for {path} will be incomplete.")
         print("There were too many 202s. Data for this repository will be incomplete.")
         return dict()
