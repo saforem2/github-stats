@@ -13,11 +13,96 @@ import requests
 ###############################################################################
 
 
+class AuthenticationError(RuntimeError):
+    """
+    Raised when GitHub rejects the access token (HTTP 401/403).
+
+    This is deliberately fatal. GitHub answers a bad token with a *valid JSON*
+    body such as {"message": "Bad credentials"}, so treating the response as
+    successful yields a badge reading "No Name" with every statistic zeroed --
+    which then gets committed over the real numbers by a green CI run. Failing
+    loudly keeps the previous good SVGs in place.
+    """
+
+
 class Queries(object):
     """
     Class with functions to query the GitHub GraphQL (v4) API and the REST (v3)
     API. Also includes functions to dynamically generate GraphQL queries.
     """
+
+    @staticmethod
+    def _raise_for_auth(status: int, body: Any = None, fatal_403: bool = True) -> None:
+        """
+        Abort on a terminal authentication/authorization failure.
+
+        401 always means the credential itself was rejected. 403 is ambiguous:
+        on the GraphQL viewer query it means the token is bad, but on a REST
+        path it is usually per-resource ("Must have push access to
+        repository") for a repo the user contributed to but does not own --
+        an expected, skippable condition. Callers that query per-repo REST
+        endpoints pass fatal_403=False so one inaccessible repo does not kill
+        the whole run.
+
+        :param status: HTTP status code of the response
+        :param body: decoded response body, used for GitHub's error message
+        :param fatal_403: whether a 403 should be treated as terminal
+        :raises AuthenticationError: if the credential was rejected
+        """
+        if status == 403 and not fatal_403:
+            return
+        if status not in (401, 403):
+            return
+        message = ""
+        if isinstance(body, dict):
+            message = str(body.get("message", ""))
+        detail = f": {message}" if message else ""
+        raise AuthenticationError(
+            f"GitHub rejected the access token (HTTP {status}){detail}. "
+            f"The ACCESS_TOKEN secret is missing, expired, or lacks the "
+            f"required scopes -- generate a new personal access token with "
+            f"'repo' and 'read:user' scopes and update the repository secret. "
+            f"Refusing to continue, because carrying on would overwrite the "
+            f"existing statistics with zeroes."
+        )
+
+    @staticmethod
+    def _raise_for_graphql_errors(result: Dict) -> None:
+        """
+        Abort when GraphQL reports errors and returns no usable data.
+
+        GraphQL answers an auth failure with HTTP 200 and a top-level "errors"
+        block, so the status code alone is not enough to detect it. Partial
+        responses (errors *and* data) are left alone: those are usually a
+        single unreadable repo, and dropping the whole run over one would be
+        worse than rendering the rest.
+
+        :param result: decoded GraphQL response
+        :raises AuthenticationError: on an auth-flavoured error
+        :raises RuntimeError: on any other fatal error with no data
+        """
+        if not isinstance(result, dict):
+            return
+        errors = result.get("errors")
+        if not errors or result.get("data"):
+            return
+        messages = "; ".join(
+            str(e.get("message", e)) for e in errors if isinstance(e, dict)
+        ) or str(errors)
+        types = {
+            str(e.get("type", "")).upper() for e in errors if isinstance(e, dict)
+        }
+        if types & {"FORBIDDEN", "UNAUTHORIZED"} or "bad credentials" in (
+            messages.lower()
+        ):
+            raise AuthenticationError(
+                f"GitHub rejected the access token: {messages}. The "
+                f"ACCESS_TOKEN secret is missing, expired, or lacks the "
+                f"required scopes -- generate a new personal access token "
+                f"with 'repo' and 'read:user' scopes and update the "
+                f"repository secret."
+            )
+        raise RuntimeError(f"GraphQL query returned errors and no data: {messages}")
 
     def __init__(
         self,
@@ -62,8 +147,16 @@ class Queries(object):
                         message="server error",
                     )
                 result = await r_async.json()
+                # A rejected token is terminal, not transient: no number of
+                # retries turns a bad credential into data.
+                self._raise_for_auth(r_async.status, result)
                 if result is not None:
+                    self._raise_for_graphql_errors(result)
                     return result
+            except AuthenticationError:
+                # Terminal: propagate past the retry loop and the sync
+                # fallback, both of which would only repeat the rejection.
+                raise
             except Exception as e_async:
                 # Log str(), not repr(): the aiohttp error's repr embeds the
                 # request headers (including the Authorization token), which
@@ -84,8 +177,12 @@ class Queries(object):
                                     f"{r_requests.status_code} server error"
                                 )
                             result = r_requests.json()
+                            self._raise_for_auth(r_requests.status_code, result)
                     if result is not None:
+                        self._raise_for_graphql_errors(result)
                         return result
+                except AuthenticationError:
+                    raise
                 except Exception as e_sync:
                     print(
                         f"requests failed for GraphQL query "
@@ -122,6 +219,22 @@ class Queries(object):
                         headers=headers,
                         params=tuple(params.items()),
                     )
+                if r_async.status in (401, 403):
+                    # 401 is terminal (bad token). 403 here is normally
+                    # per-repo -- "Must have push access to repository" for a
+                    # repo the user contributed to but does not own -- so it
+                    # is skipped rather than fatal.
+                    body = None
+                    try:
+                        body = await r_async.json()
+                    except Exception:
+                        r_async.release()
+                    self._raise_for_auth(r_async.status, body, fatal_403=False)
+                    print(
+                        f"Skipping a path that returned 403 "
+                        f"(no access to this repository's data)."
+                    )
+                    return dict()
                 if r_async.status == 202:
                     # print(f"{path} returned 202. Retrying...")
                     print(f"A path returned 202. Retrying...")
@@ -140,6 +253,10 @@ class Queries(object):
                 result = await r_async.json()
                 if result is not None:
                     return result
+            except AuthenticationError:
+                # Terminal: propagate past the retry loop and the sync
+                # fallback, both of which would only repeat the rejection.
+                raise
             except Exception as e_async:
                 # Log str(), not repr(): the aiohttp error's repr embeds the
                 # request headers (including the Authorization token), which
@@ -153,6 +270,15 @@ class Queries(object):
                         params=tuple(params.items()),
                     ) as r_requests:
                         status = r_requests.status_code
+                        if status in (401, 403):
+                            body = None
+                            try:
+                                body = r_requests.json()
+                            except Exception:
+                                pass
+                            # 401 fatal; 403 is per-repo here, so skip it.
+                            self._raise_for_auth(status, body, fatal_403=False)
+                            return dict()
                         if status == 202:
                             print(f"A path returned 202. Retrying...")
                         elif status == 204:

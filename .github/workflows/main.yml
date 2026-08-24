@@ -44,6 +44,36 @@ jobs:
         EXCLUDED_LANGS: ${{ secrets.EXCLUDED_LANGS }}
         EXCLUDE_FORKED_REPOS: false
 
+    # Refuse to publish obviously-empty output. generate_images.py now fails
+    # loudly on a rejected token, but this is the last line of defence: any
+    # future path that degrades to a "No Name" / all-zero badge must not be
+    # committed over the real statistics.
+    - name: Sanity check generated images
+      run: |
+        for f in generated/overview.svg generated/languages.svg; do
+          if [ ! -s "$f" ]; then
+            echo "::error::$f is missing or empty."
+            exit 1
+          fi
+        done
+        if grep -q "No Name" generated/overview.svg; then
+          echo "::error::overview.svg fell back to 'No Name' -- the API"
+          echo "::error::returned no user data. Refusing to commit."
+          exit 1
+        fi
+        # A real account has a non-zero figure somewhere in the table; an
+        # all-zero table means every query silently came back empty.
+        if ! grep -qE "<td>[1-9][0-9,]*</td>" generated/overview.svg; then
+          echo "::error::Every statistic in overview.svg is zero."
+          echo "::error::Refusing to commit over the previous good values."
+          exit 1
+        fi
+        if ! grep -q 'class="lang"' generated/languages.svg; then
+          echo "::error::languages.svg contains no languages."
+          exit 1
+        fi
+        echo "Generated images look sane."
+
     # Commit all changed files to the repository
     - name: Commit to the repo
       run: |
